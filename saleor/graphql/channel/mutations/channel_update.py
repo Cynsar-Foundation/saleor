@@ -9,17 +9,20 @@ from ....permission.enums import ChannelPermissions, OrderPermissions
 from ....shipping.tasks import (
     drop_invalid_shipping_methods_relations_for_given_channels,
 )
+from ....webhook.event_types import WebhookEventAsyncType
 from ...account.enums import CountryCodeEnum
 from ...core import ResolveInfo
 from ...core.descriptions import ADDED_IN_31, ADDED_IN_35
 from ...core.doc_category import DOC_CATEGORY_CHANNELS
 from ...core.mutations import ModelMutation
 from ...core.types import ChannelError, NonNullList
+from ...core.utils import WebhookEventInfo
 from ...plugins.dataloaders import get_plugin_manager_promise
 from ...utils.validators import check_for_duplicates
 from ..types import Channel
 from ..utils import delete_invalid_warehouse_to_shipping_zone_relations
 from .channel_create import ChannelInput
+from .utils import clean_delete_expired_orders_after, clean_expire_orders_after
 
 
 class ChannelUpdateInput(ChannelInput):
@@ -67,6 +70,12 @@ class ChannelUpdate(ModelMutation):
         object_type = Channel
         error_type_class = ChannelError
         error_type_field = "channel_errors"
+        webhook_events_info = [
+            WebhookEventInfo(
+                type=WebhookEventAsyncType.CHANNEL_UPDATED,
+                description="A channel was updated.",
+            ),
+        ]
 
     @classmethod
     def clean_input(cls, info: ResolveInfo, instance, data, **kwargs):
@@ -110,9 +119,17 @@ class ChannelUpdate(ModelMutation):
 
             if "expire_orders_after" in order_settings:
                 expire_orders_after = order_settings["expire_orders_after"]
-                cleaned_input["expire_orders_after"] = cls.clean_expire_orders_after(
+                cleaned_input["expire_orders_after"] = clean_expire_orders_after(
                     expire_orders_after
                 )
+
+            if "delete_expired_orders_after" in order_settings:
+                delete_expired_orders_after = order_settings[
+                    "delete_expired_orders_after"
+                ]
+                cleaned_input[
+                    "delete_expired_orders_after"
+                ] = clean_delete_expired_orders_after(delete_expired_orders_after)
 
             if mark_as_paid_strategy := order_settings.get("mark_as_paid_strategy"):
                 cleaned_input["order_mark_as_paid_strategy"] = mark_as_paid_strategy
@@ -124,21 +141,6 @@ class ChannelUpdate(ModelMutation):
                     "default_transaction_flow_strategy"
                 ] = default_transaction_strategy
         return cleaned_input
-
-    @classmethod
-    def clean_expire_orders_after(cls, expire_orders_after):
-        if expire_orders_after is None or expire_orders_after == 0:
-            return None
-        if expire_orders_after < 0:
-            raise ValidationError(
-                {
-                    "expire_orders_after": ValidationError(
-                        "Expiration time for orders cannot be lower than 0.",
-                        code=ChannelErrorCode.INVALID.value,
-                    )
-                }
-            )
-        return expire_orders_after
 
     @classmethod
     def check_permissions(cls, context, permissions=None, **data):

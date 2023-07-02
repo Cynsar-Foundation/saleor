@@ -74,6 +74,7 @@ class OrderLinesCreate(EditableOrderValidationMixin, BaseMutation):
             )
             quantity = input_line["quantity"]
 
+            custom_price = input_line.get("price")
             if quantity > 0:
                 if force_new_line or variants_from_existing_lines.count(variant.pk) > 1:
                     grouped_lines_data.append(
@@ -81,6 +82,7 @@ class OrderLinesCreate(EditableOrderValidationMixin, BaseMutation):
                             variant_id=str(variant.id),
                             variant=variant,
                             quantity=quantity,
+                            price_override=custom_price,
                         )
                     )
                 else:
@@ -97,6 +99,7 @@ class OrderLinesCreate(EditableOrderValidationMixin, BaseMutation):
 
                     line_data.variant = variant
                     line_data.quantity += quantity
+                    line_data.price_override = custom_price
             else:
                 invalid_ids.append(variant_id)
         if invalid_ids:
@@ -150,6 +153,7 @@ class OrderLinesCreate(EditableOrderValidationMixin, BaseMutation):
         cls, _root, info: ResolveInfo, /, *, id: str, input
     ):
         order = cls.get_node_or_error(info, id, only_type=Order)
+        cls.check_channel_permissions(info, [order.channel_id])
         cls.validate_order(order)
         existing_lines_info = fetch_order_lines(order)
 
@@ -200,7 +204,9 @@ class OrderLinesCreate(EditableOrderValidationMixin, BaseMutation):
             return
 
         line_info = list(
-            filter(lambda x: (x.variant.pk == int(variant_id)), lines_info)
+            filter(
+                lambda x: (x.variant and x.variant.pk == int(variant_id)), lines_info
+            )
         )
 
         if not line_info or len(line_info) > 1:

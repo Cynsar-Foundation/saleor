@@ -24,12 +24,16 @@ from ....account.notifications import (
     send_account_confirmation,
 )
 from ....app.models import App
+from ....checkout.fetch import fetch_checkout_info, fetch_checkout_lines
 from ....core import EventDeliveryStatus
 from ....core.models import EventDelivery, EventDeliveryAttempt, EventPayload
 from ....core.notification.utils import get_site_context
 from ....core.notify_events import NotifyEventType
 from ....core.utils.url import prepare_url
-from ....discount.utils import fetch_catalogue_info
+from ....discount.utils import (
+    create_or_update_discount_objects_from_sale_for_checkout,
+    fetch_catalogue_info,
+)
 from ....graphql.discount.mutations.utils import convert_catalogue_info_to_global_ids
 from ....payment import TransactionAction, TransactionEventType
 from ....payment.interface import TransactionActionData
@@ -49,7 +53,6 @@ from ....webhook.payloads import (
     generate_product_variant_with_stock_payload,
     generate_sale_payload,
     generate_sale_toggle_payload,
-    generate_transaction_action_request_payload,
 )
 from ....webhook.utils import get_webhooks_for_event
 from ...manager import get_plugins_manager
@@ -342,6 +345,96 @@ def test_order_fully_paid(
     mocked_webhook_trigger.assert_called_once_with(
         expected_data,
         WebhookEventAsyncType.ORDER_FULLY_PAID,
+        [any_webhook],
+        order_with_lines,
+        None,
+    )
+
+
+@freeze_time("1914-06-28 10:50")
+@mock.patch("saleor.plugins.webhook.plugin.get_webhooks_for_event")
+@mock.patch("saleor.plugins.webhook.plugin.trigger_webhooks_async")
+def test_order_paid(
+    mocked_webhook_trigger,
+    mocked_get_webhooks_for_event,
+    any_webhook,
+    settings,
+    order_with_lines,
+):
+    # given
+    mocked_get_webhooks_for_event.return_value = [any_webhook]
+    settings.PLUGINS = ["saleor.plugins.webhook.plugin.WebhookPlugin"]
+    manager = get_plugins_manager()
+
+    # when
+    manager.order_paid(order_with_lines)
+
+    # then
+    expected_data = generate_order_payload(order_with_lines)
+
+    mocked_webhook_trigger.assert_called_once_with(
+        expected_data,
+        WebhookEventAsyncType.ORDER_PAID,
+        [any_webhook],
+        order_with_lines,
+        None,
+    )
+
+
+@freeze_time("1914-06-28 10:50")
+@mock.patch("saleor.plugins.webhook.plugin.get_webhooks_for_event")
+@mock.patch("saleor.plugins.webhook.plugin.trigger_webhooks_async")
+def test_order_refunded(
+    mocked_webhook_trigger,
+    mocked_get_webhooks_for_event,
+    any_webhook,
+    settings,
+    order_with_lines,
+):
+    # given
+    mocked_get_webhooks_for_event.return_value = [any_webhook]
+    settings.PLUGINS = ["saleor.plugins.webhook.plugin.WebhookPlugin"]
+    manager = get_plugins_manager()
+
+    # when
+    manager.order_refunded(order_with_lines)
+
+    # then
+    expected_data = generate_order_payload(order_with_lines)
+
+    mocked_webhook_trigger.assert_called_once_with(
+        expected_data,
+        WebhookEventAsyncType.ORDER_REFUNDED,
+        [any_webhook],
+        order_with_lines,
+        None,
+    )
+
+
+@freeze_time("1914-06-28 10:50")
+@mock.patch("saleor.plugins.webhook.plugin.get_webhooks_for_event")
+@mock.patch("saleor.plugins.webhook.plugin.trigger_webhooks_async")
+def test_order_fully_refunded(
+    mocked_webhook_trigger,
+    mocked_get_webhooks_for_event,
+    any_webhook,
+    settings,
+    order_with_lines,
+):
+    # given
+    mocked_get_webhooks_for_event.return_value = [any_webhook]
+    settings.PLUGINS = ["saleor.plugins.webhook.plugin.WebhookPlugin"]
+    manager = get_plugins_manager()
+
+    # when
+    manager.order_fully_refunded(order_with_lines)
+
+    # then
+    expected_data = generate_order_payload(order_with_lines)
+
+    mocked_webhook_trigger.assert_called_once_with(
+        expected_data,
+        WebhookEventAsyncType.ORDER_FULLY_REFUNDED,
         [any_webhook],
         order_with_lines,
         None,
@@ -841,7 +934,14 @@ def test_checkout_created(
 
 
 def test_checkout_payload_includes_sales(checkout_with_item, sale, discount_info):
-    data = json.loads(generate_checkout_payload(checkout_with_item))
+    # given
+    checkout = checkout_with_item
+    checkout_lines, _ = fetch_checkout_lines(checkout, prefetch_variant_attributes=True)
+    manager = get_plugins_manager()
+    checkout_info = fetch_checkout_info(checkout, checkout_lines, manager)
+    create_or_update_discount_objects_from_sale_for_checkout(
+        checkout_info, checkout_lines, [discount_info]
+    )
     variant = checkout_with_item.lines.first().variant
     channel_listing = variant.channel_listings.first()
     variant_price_with_sale = variant.get_price(
@@ -858,6 +958,11 @@ def test_checkout_payload_includes_sales(checkout_with_item, sale, discount_info
         channel_listing=channel_listing,
         discounts=[],
     )
+
+    # when
+    data = json.loads(generate_checkout_payload(checkout))
+
+    # then
     assert variant_price_without_sale > variant_price_with_sale
     assert Decimal(data[0]["lines"][0]["base_price"]) == variant_price_with_sale.amount
 
@@ -1499,65 +1604,6 @@ def test_send_webhook_request_async_when_webhook_is_disabled(
 
 @freeze_time("1914-06-28 10:50")
 @mock.patch("saleor.plugins.webhook.plugin.get_webhooks_for_event")
-@mock.patch("saleor.plugins.webhook.plugin.trigger_webhooks_async")
-def test_transaction_action_request(
-    mocked_webhook_trigger,
-    mocked_get_webhooks_for_event,
-    any_webhook,
-    settings,
-    order,
-    channel_USD,
-):
-    # given
-    mocked_get_webhooks_for_event.return_value = [any_webhook]
-    settings.PLUGINS = ["saleor.plugins.webhook.plugin.WebhookPlugin"]
-    manager = get_plugins_manager()
-    transaction = TransactionItem.objects.create(
-        status="Authorized",
-        name="Credit card",
-        psp_reference="PSP ref",
-        available_actions=["capture", "void"],
-        currency="USD",
-        order_id=order.pk,
-        authorized_value=Decimal("10"),
-    )
-
-    action_value = Decimal("5.00")
-
-    request_event = transaction.events.create(
-        amount_value=action_value,
-        currency=transaction.currency,
-        type=TransactionEventType.CHARGE_REQUEST,
-    )
-
-    transaction_action_data = TransactionActionData(
-        transaction=transaction,
-        action_type=TransactionAction.CHARGE,
-        action_value=action_value,
-        event=request_event,
-        transaction_app_owner=None,
-    )
-
-    # when
-    manager.transaction_action_request(
-        transaction_action_data, channel_slug=channel_USD.slug
-    )
-
-    # then
-    expected_data = generate_transaction_action_request_payload(
-        transaction_action_data,
-    )
-    mocked_webhook_trigger.assert_called_once_with(
-        expected_data,
-        WebhookEventAsyncType.TRANSACTION_ACTION_REQUEST,
-        [any_webhook],
-        subscribable_object=transaction_action_data,
-        requestor=ANY,
-    )
-
-
-@freeze_time("1914-06-28 10:50")
-@mock.patch("saleor.plugins.webhook.plugin.get_webhooks_for_event")
 @mock.patch("saleor.plugins.webhook.plugin.trigger_transaction_request")
 def test_transaction_charge_requested(
     mocked_webhook_trigger,
@@ -1576,7 +1622,6 @@ def test_transaction_charge_requested(
     settings.PLUGINS = ["saleor.plugins.webhook.plugin.WebhookPlugin"]
     manager = get_plugins_manager()
     transaction = TransactionItem.objects.create(
-        status="Authorized",
         name="Credit card",
         psp_reference="PSP ref",
         available_actions=["capture", "void"],
@@ -1629,7 +1674,6 @@ def test_transaction_refund_requested(
     settings.PLUGINS = ["saleor.plugins.webhook.plugin.WebhookPlugin"]
     manager = get_plugins_manager()
     transaction = TransactionItem.objects.create(
-        status="Authorized",
         name="Credit card",
         psp_reference="PSP ref",
         available_actions=[
@@ -1684,7 +1728,6 @@ def test_transaction_cancelation_requested(
     settings.PLUGINS = ["saleor.plugins.webhook.plugin.WebhookPlugin"]
     manager = get_plugins_manager()
     transaction = TransactionItem.objects.create(
-        status="Authorized",
         name="Credit card",
         psp_reference="PSP ref",
         available_actions=[
@@ -1791,17 +1834,13 @@ def test_send_webhook_request_async_when_max_retries_exceeded(
     mocked_observability.assert_called_once_with(attempt)
 
 
-@pytest.mark.parametrize(
-    "event, expected_is_active",
-    (("invoice_request", False), ("transaction_action_request", True)),
-)
-def test_is_event_active(
-    event, expected_is_active, settings, webhook, permission_manage_payments
-):
+def test_is_event_active(settings, webhook, permission_manage_orders):
     # given
+    event = "invoice_request"
+    expected_is_active = True
     settings.PLUGINS = ["saleor.plugins.webhook.plugin.WebhookPlugin"]
-    webhook.app.permissions.add(permission_manage_payments)
-    webhook.events.create(event_type=WebhookEventAsyncType.TRANSACTION_ACTION_REQUEST)
+    webhook.app.permissions.add(permission_manage_orders)
+    webhook.events.create(event_type=WebhookEventAsyncType.INVOICE_REQUESTED)
 
     manager = get_plugins_manager()
 

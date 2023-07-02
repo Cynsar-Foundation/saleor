@@ -1,5 +1,6 @@
 from decimal import Decimal
 from unittest.mock import patch
+from uuid import uuid4
 
 import graphene
 from django.utils import timezone
@@ -26,6 +27,14 @@ fragment TransactionEventData on TransactionEventReport {
         actions
         events {
             id
+        }
+        createdBy {
+            ... on User {
+                id
+            }
+            ... on App {
+                id
+            }
         }
     }
     transactionEvent {
@@ -208,6 +217,79 @@ def test_transaction_event_report_by_user(
     assert transaction.available_actions == [TransactionActionEnum.CANCEL.value]
 
 
+def test_transaction_event_report_by_another_user(
+    staff_api_client, permission_manage_payments, admin_user, transaction_item_generator
+):
+    # given
+    transaction = transaction_item_generator(user=admin_user)
+    event_time = timezone.now()
+    external_url = f"http://{TEST_SERVER_DOMAIN}/external-url"
+    message = "Sucesfull charge"
+    psp_reference = "111-abc"
+    amount = Decimal("11.00")
+    transaction_id = graphene.Node.to_global_id("TransactionItem", transaction.token)
+    variables = {
+        "id": transaction_id,
+        "type": TransactionEventTypeEnum.CHARGE_SUCCESS.name,
+        "amount": amount,
+        "pspReference": psp_reference,
+        "time": event_time.isoformat(),
+        "externalUrl": external_url,
+        "message": message,
+        "availableActions": [TransactionActionEnum.CANCEL.name],
+    }
+    query = (
+        MUTATION_DATA_FRAGMENT
+        + """
+       mutation TransactionEventReport(
+           $id: ID!
+           $type: TransactionEventTypeEnum!
+           $amount: PositiveDecimal!
+           $pspReference: String!
+           $time: DateTime
+           $externalUrl: String
+           $message: String
+           $availableActions: [TransactionActionEnum!]!
+       ) {
+           transactionEventReport(
+               id: $id
+               type: $type
+               amount: $amount
+               pspReference: $pspReference
+               time: $time
+               externalUrl: $externalUrl
+               message: $message
+               availableActions: $availableActions
+           ) {
+               ...TransactionEventData
+           }
+       }
+       """
+    )
+    # when
+    response = staff_api_client.post_graphql(
+        query, variables, permissions=[permission_manage_payments]
+    )
+
+    # then
+    get_graphql_content(response)
+    event = TransactionEvent.objects.get()
+    assert event.psp_reference == psp_reference
+    assert event.type == TransactionEventTypeEnum.CHARGE_SUCCESS.value
+    assert event.amount_value == amount
+    assert event.currency == transaction.currency
+    assert event.created_at == event_time
+    assert event.external_url == external_url
+    assert event.transaction == transaction
+    assert event.app_identifier is None
+    assert event.app is None
+    assert transaction.user != staff_api_client.user
+    assert event.user == staff_api_client.user
+
+    transaction.refresh_from_db()
+    assert transaction.available_actions == [TransactionActionEnum.CANCEL.value]
+
+
 def test_transaction_event_report_no_permission(
     transaction_item_created_by_app,
     app_api_client,
@@ -259,6 +341,7 @@ def test_transaction_event_report_called_by_non_app_owner(
     second_app = app_api_client.app
     second_app.pk = None
     second_app.identifier = "different-identifier"
+    second_app.uuid = uuid4()
     second_app.save()
     transaction_item_created_by_app.app_identifier = second_app.identifier
     transaction_item_created_by_app.app = None
@@ -504,7 +587,8 @@ def test_transaction_event_report_incorrect_amount_for_already_existing(
 
 
 @patch(
-    "saleor.graphql.payment.mutations.recalculate_transaction_amounts",
+    "saleor.graphql.payment.mutations.transaction.transaction_event_report."
+    "recalculate_transaction_amounts",
     wraps=recalculate_transaction_amounts,
 )
 def test_transaction_event_report_calls_amount_recalculations(
@@ -565,7 +649,7 @@ def test_transaction_event_report_calls_amount_recalculations(
     )
 
     # then
-    mocked_recalculation.assert_called_once_with(transaction)
+    mocked_recalculation.assert_called_once_with(transaction, save=False)
     transaction.refresh_from_db()
     assert transaction.charged_value == amount
 
@@ -890,10 +974,8 @@ def test_transaction_event_updates_checkout_full_paid_with_charged_amount(
     checkout = checkout_with_items
 
     lines, _ = fetch_checkout_lines(checkout)
-    checkout_info = fetch_checkout_info(checkout, lines, [], plugins_manager)
-    checkout_info, _ = fetch_checkout_data(
-        checkout_info, plugins_manager, lines, discounts=[]
-    )
+    checkout_info = fetch_checkout_info(checkout, lines, plugins_manager)
+    checkout_info, _ = fetch_checkout_data(checkout_info, plugins_manager, lines)
     psp_reference = "111-abc"
     transaction = transaction_item_generator(
         app=app_api_client.app, checkout_id=checkout.pk
@@ -956,10 +1038,8 @@ def test_transaction_event_updates_checkout_full_paid_with_pending_charge_amount
     checkout = checkout_with_items
 
     lines, _ = fetch_checkout_lines(checkout)
-    checkout_info = fetch_checkout_info(checkout, lines, [], plugins_manager)
-    checkout_info, _ = fetch_checkout_data(
-        checkout_info, plugins_manager, lines, discounts=[]
-    )
+    checkout_info = fetch_checkout_info(checkout, lines, plugins_manager)
+    checkout_info, _ = fetch_checkout_data(checkout_info, plugins_manager, lines)
     psp_reference = "111-abc"
     transaction = transaction_item_generator(
         app=app_api_client.app, checkout_id=checkout.pk
@@ -1232,11 +1312,13 @@ def test_transaction_event_report_doesnt_accept_old_id_for_new_transaction(
     assert error["field"] == "id"
 
 
+@patch("saleor.plugins.manager.PluginsManager.order_paid")
 @patch("saleor.plugins.manager.PluginsManager.order_updated")
 @patch("saleor.plugins.manager.PluginsManager.order_fully_paid")
 def test_transaction_event_report_for_order_triggers_webhooks_when_fully_paid(
     mock_order_fully_paid,
     mock_order_updated,
+    mock_order_paid,
     transaction_item_generator,
     app_api_client,
     permission_manage_payments,
@@ -1285,6 +1367,7 @@ def test_transaction_event_report_for_order_triggers_webhooks_when_fully_paid(
     assert order.charge_status == OrderChargeStatusEnum.FULL.value
     mock_order_fully_paid.assert_called_once_with(order)
     mock_order_updated.assert_called_once_with(order)
+    mock_order_paid.assert_called_once_with(order)
 
 
 @patch("saleor.plugins.manager.PluginsManager.order_updated")
@@ -1450,3 +1533,186 @@ def test_transaction_event_report_for_order_triggers_webhooks_when_fully_authori
     assert order.authorize_status == OrderAuthorizeStatusEnum.FULL.value
     assert not mock_order_fully_paid.called
     mock_order_updated.assert_called_once_with(order)
+
+
+@patch("saleor.plugins.manager.PluginsManager.order_refunded")
+@patch("saleor.plugins.manager.PluginsManager.order_updated")
+@patch("saleor.plugins.manager.PluginsManager.order_fully_refunded")
+def test_transaction_event_report_for_order_triggers_webhooks_when_fully_refunded(
+    mock_order_fully_refunded,
+    mock_order_updated,
+    mock_order_refunded,
+    transaction_item_generator,
+    app_api_client,
+    permission_manage_payments,
+    order_with_lines,
+):
+    # given
+    order = order_with_lines
+    psp_reference = "111-abc"
+    transaction = transaction_item_generator(app=app_api_client.app, order_id=order.pk)
+    transaction_id = graphene.Node.to_global_id("TransactionItem", transaction.token)
+    variables = {
+        "id": transaction_id,
+        "type": TransactionEventTypeEnum.REFUND_SUCCESS.name,
+        "amount": order.total.gross.amount,
+        "pspReference": psp_reference,
+    }
+    query = (
+        MUTATION_DATA_FRAGMENT
+        + """
+    mutation TransactionEventReport(
+        $id: ID!
+        $type: TransactionEventTypeEnum!
+        $amount: PositiveDecimal!
+        $pspReference: String!
+    ) {
+        transactionEventReport(
+            id: $id
+            type: $type
+            amount: $amount
+            pspReference: $pspReference
+        ) {
+            ...TransactionEventData
+        }
+    }
+    """
+    )
+    # when
+    response = app_api_client.post_graphql(
+        query, variables, permissions=[permission_manage_payments]
+    )
+
+    # then
+    get_graphql_content(response)
+    order.refresh_from_db()
+
+    mock_order_fully_refunded.assert_called_once_with(order)
+    mock_order_updated.assert_called_once_with(order)
+    mock_order_refunded.assert_called_once_with(order)
+
+
+@patch("saleor.plugins.manager.PluginsManager.order_refunded")
+@patch("saleor.plugins.manager.PluginsManager.order_updated")
+@patch("saleor.plugins.manager.PluginsManager.order_fully_refunded")
+def test_transaction_event_report_for_order_triggers_webhooks_when_partially_refunded(
+    mock_order_fully_refunded,
+    mock_order_updated,
+    mock_order_refunded,
+    transaction_item_generator,
+    app_api_client,
+    permission_manage_payments,
+    order_with_lines,
+):
+    # given
+    order = order_with_lines
+    psp_reference = "111-abc"
+    transaction = transaction_item_generator(app=app_api_client.app, order_id=order.pk)
+    transaction_id = graphene.Node.to_global_id("TransactionItem", transaction.token)
+    variables = {
+        "id": transaction_id,
+        "type": TransactionEventTypeEnum.REFUND_SUCCESS.name,
+        "amount": Decimal(10),
+        "pspReference": psp_reference,
+    }
+    query = (
+        MUTATION_DATA_FRAGMENT
+        + """
+    mutation TransactionEventReport(
+        $id: ID!
+        $type: TransactionEventTypeEnum!
+        $amount: PositiveDecimal!
+        $pspReference: String!
+    ) {
+        transactionEventReport(
+            id: $id
+            type: $type
+            amount: $amount
+            pspReference: $pspReference
+        ) {
+            ...TransactionEventData
+        }
+    }
+    """
+    )
+    # when
+    response = app_api_client.post_graphql(
+        query, variables, permissions=[permission_manage_payments]
+    )
+
+    # then
+    get_graphql_content(response)
+    order.refresh_from_db()
+
+    assert not mock_order_fully_refunded.called
+    mock_order_refunded.assert_called_once_with(order)
+    mock_order_updated.assert_called_once_with(order)
+
+
+def test_transaction_event_report_by_app_assign_app_owner(
+    transaction_item_generator,
+    app_api_client,
+    permission_manage_payments,
+):
+    # given
+    transaction = transaction_item_generator(authorized_value=Decimal("10"))
+    event_time = timezone.now()
+    external_url = f"http://{TEST_SERVER_DOMAIN}/external-url"
+    message = "Sucesfull charge"
+    psp_reference = "111-abc"
+    amount = Decimal("11.00")
+    transaction_id = graphene.Node.to_global_id("TransactionItem", transaction.token)
+    variables = {
+        "id": transaction_id,
+        "type": TransactionEventTypeEnum.CHARGE_SUCCESS.name,
+        "amount": amount,
+        "pspReference": psp_reference,
+        "time": event_time.isoformat(),
+        "externalUrl": external_url,
+        "message": message,
+        "availableActions": [TransactionActionEnum.REFUND.name],
+    }
+    query = (
+        MUTATION_DATA_FRAGMENT
+        + """
+    mutation TransactionEventReport(
+        $id: ID!
+        $type: TransactionEventTypeEnum!
+        $amount: PositiveDecimal!
+        $pspReference: String!
+        $time: DateTime
+        $externalUrl: String
+        $message: String
+        $availableActions: [TransactionActionEnum!]!
+    ) {
+        transactionEventReport(
+            id: $id
+            type: $type
+            amount: $amount
+            pspReference: $pspReference
+            time: $time
+            externalUrl: $externalUrl
+            message: $message
+            availableActions: $availableActions
+        ) {
+            ...TransactionEventData
+        }
+    }
+    """
+    )
+    # when
+    response = app_api_client.post_graphql(
+        query, variables, permissions=[permission_manage_payments]
+    )
+
+    # then
+    response = get_graphql_content(response)
+    transaction_report_data = response["data"]["transactionEventReport"]
+    transaction.refresh_from_db()
+
+    assert transaction_report_data["transaction"]["createdBy"][
+        "id"
+    ] == to_global_id_or_none(app_api_client.app)
+    assert transaction.app_identifier == app_api_client.app.identifier
+    assert transaction.app == app_api_client.app
+    assert transaction.user is None

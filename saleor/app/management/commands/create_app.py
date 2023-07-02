@@ -8,6 +8,7 @@ from django.core.management.base import CommandParser
 from django.urls import reverse
 from requests.exceptions import RequestException
 
+from .... import schema_version
 from ....app.headers import AppHeaders, DeprecatedAppHeaders
 from ....core.utils import build_absolute_uri
 from ...models import App
@@ -36,7 +37,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--target-url",
             dest="target_url",
-            help="Url which will receive newly created data of app object. "
+            help="URL which will receive newly created data of app object. "
             "Command doesn't return app data to stdout when this "
             "argument is provided.",
         )
@@ -48,9 +49,16 @@ class Command(BaseCommand):
             DeprecatedAppHeaders.DOMAIN: domain,
             AppHeaders.DOMAIN: domain,
             AppHeaders.API_URL: build_absolute_uri(reverse("api"), domain),
+            AppHeaders.SCHEMA_VERSION: schema_version,
         }
         try:
-            response = requests.post(target_url, json=data, headers=headers, timeout=15)
+            response = requests.post(
+                target_url,
+                json=data,
+                headers=headers,
+                timeout=15,
+                allow_redirects=False,
+            )
         except RequestException as e:
             raise CommandError(f"Request failed. Exception: {e}")
         response.raise_for_status()

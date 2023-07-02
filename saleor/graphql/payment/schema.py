@@ -20,6 +20,7 @@ from .mutations import (
     TransactionInitialize,
     TransactionProcess,
     TransactionRequestAction,
+    TransactionRequestRefundForGrantedRefund,
     TransactionUpdate,
 )
 from .resolvers import resolve_payment_by_id, resolve_payments, resolve_transaction
@@ -73,6 +74,8 @@ class PaymentQueries(graphene.ObjectType):
     @staticmethod
     def resolve_transaction(_root, info: ResolveInfo, **kwargs):
         _, id = from_global_id_or_error(kwargs["id"], TransactionItem)
+        if not id:
+            return None
         return resolve_transaction(id)
 
 
@@ -86,6 +89,9 @@ class PaymentMutations(graphene.ObjectType):
     transaction_create = TransactionCreate.Field()
     transaction_update = TransactionUpdate.Field()
     transaction_request_action = TransactionRequestAction.Field()
+    transaction_request_refund_for_granted_refund = (
+        TransactionRequestRefundForGrantedRefund.Field()
+    )
     transaction_event_report = TransactionEventReport.Field()
 
     payment_gateway_initialize = PaymentGatewayInitialize.Field()

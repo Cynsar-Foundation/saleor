@@ -21,6 +21,30 @@ def subscription_webhook(webhook_app):
 
 
 @pytest.fixture
+def subscription_account_confirmation_requested_webhook(subscription_webhook):
+    return subscription_webhook(
+        queries.ACCOUNT_CONFIRMATION_REQUESTED,
+        WebhookEventAsyncType.ACCOUNT_CONFIRMATION_REQUESTED,
+    )
+
+
+@pytest.fixture
+def subscription_account_change_email_requested_webhook(subscription_webhook):
+    return subscription_webhook(
+        queries.ACCOUNT_CHANGE_EMAIL_REQUESTED,
+        WebhookEventAsyncType.ACCOUNT_CHANGE_EMAIL_REQUESTED,
+    )
+
+
+@pytest.fixture
+def subscription_account_delete_requested_webhook(subscription_webhook):
+    return subscription_webhook(
+        queries.ACCOUNT_DELETE_REQUESTED,
+        WebhookEventAsyncType.ACCOUNT_DELETE_REQUESTED,
+    )
+
+
+@pytest.fixture
 def subscription_address_created_webhook(subscription_webhook):
     return subscription_webhook(
         queries.ADDRESS_CREATED, WebhookEventAsyncType.ADDRESS_CREATED
@@ -437,6 +461,25 @@ def subscription_order_fully_paid_webhook(subscription_webhook):
 
 
 @pytest.fixture
+def subscription_order_paid_webhook(subscription_webhook):
+    return subscription_webhook(queries.ORDER_PAID, WebhookEventAsyncType.ORDER_PAID)
+
+
+@pytest.fixture
+def subscription_order_fully_refunded_webhook(subscription_webhook):
+    return subscription_webhook(
+        queries.ORDER_FULLY_REFUNDED, WebhookEventAsyncType.ORDER_FULLY_REFUNDED
+    )
+
+
+@pytest.fixture
+def subscription_order_refunded_webhook(subscription_webhook):
+    return subscription_webhook(
+        queries.ORDER_REFUNDED, WebhookEventAsyncType.ORDER_REFUNDED
+    )
+
+
+@pytest.fixture
 def subscription_order_cancelled_webhook(subscription_webhook):
     return subscription_webhook(
         queries.ORDER_CANCELLED, WebhookEventAsyncType.ORDER_CANCELLED
@@ -461,6 +504,13 @@ def subscription_order_fulfilled_webhook(subscription_webhook):
 def subscription_order_metadata_updated_webhook(subscription_webhook):
     return subscription_webhook(
         queries.ORDER_METADATA_UPDATED, WebhookEventAsyncType.ORDER_METADATA_UPDATED
+    )
+
+
+@pytest.fixture
+def subscription_order_bulk_created_webhook(subscription_webhook):
+    return subscription_webhook(
+        queries.ORDER_BULK_CREATED, WebhookEventAsyncType.ORDER_BULK_CREATED
     )
 
 

@@ -10,6 +10,7 @@ from .....permission.enums import ProductPermissions
 from .....product import models
 from .....product.error_codes import ProductErrorCode
 from .....product.search import update_product_search_vector
+from .....product.tasks import update_product_discounted_price_task
 from ....attribute.types import AttributeValueInput
 from ....attribute.utils import AttributeAssignmentMixin, AttrValuesInput
 from ....channel import ChannelContext
@@ -26,7 +27,7 @@ from ....core.mutations import ModelMutation
 from ....core.scalars import WeightScalar
 from ....core.types import BaseInputObjectType, NonNullList, ProductError, SeoInput
 from ....core.validators import clean_seo_fields, validate_slug_and_generate_if_needed
-from ....meta.mutations import MetadataInput
+from ....meta.inputs import MetadataInput
 from ....plugins.dataloaders import get_plugin_manager_promise
 from ...types import Product
 from ..utils import clean_tax_code
@@ -220,6 +221,7 @@ class ProductCreate(ModelMutation):
     def post_save_action(cls, info: ResolveInfo, instance, _cleaned_input):
         product = models.Product.objects.prefetched_for_webhook().get(pk=instance.pk)
         update_product_search_vector(instance)
+        update_product_discounted_price_task.delay(instance.id)
         manager = get_plugin_manager_promise(info.context).get()
         cls.call_event(manager.product_created, product)
 

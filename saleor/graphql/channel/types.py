@@ -22,11 +22,12 @@ from ..core.descriptions import (
     ADDED_IN_37,
     ADDED_IN_312,
     ADDED_IN_313,
+    ADDED_IN_314,
     PREVIEW_FEATURE,
 )
 from ..core.doc_category import DOC_CATEGORY_ORDERS, DOC_CATEGORY_PRODUCTS
 from ..core.fields import PermissionsField
-from ..core.scalars import Minute
+from ..core.scalars import Day, Minute
 from ..core.types import BaseObjectType, CountryDisplay, ModelObjectType, NonNullList
 from ..meta.types import ObjectWithMetadata
 from ..translations.resolvers import resolve_translation
@@ -212,6 +213,14 @@ class OrderSettings(ObjectType):
             "requested action for the transaction." + ADDED_IN_313 + PREVIEW_FEATURE
         ),
     )
+    delete_expired_orders_after = Day(
+        required=True,
+        description=(
+            "The time in days after expired orders will be deleted."
+            + ADDED_IN_314
+            + PREVIEW_FEATURE
+        ),
+    )
 
     class Meta:
         description = "Represents the channel-specific order settings."
@@ -219,7 +228,7 @@ class OrderSettings(ObjectType):
 
 
 class Channel(ModelObjectType):
-    id = graphene.GlobalID(required=True)
+    id = graphene.GlobalID(required=True, description="The ID of the channel.")
     slug = graphene.String(
         required=True,
         description="Slug of the channel.",
@@ -457,4 +466,5 @@ class Channel(ModelObjectType):
             expire_orders_after=root.expire_orders_after,
             mark_as_paid_strategy=root.order_mark_as_paid_strategy,
             default_transaction_flow_strategy=root.default_transaction_flow_strategy,
+            delete_expired_orders_after=root.delete_expired_orders_after.days,
         )

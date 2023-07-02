@@ -19,6 +19,10 @@ from ..permission.enums import (
 class WebhookEventAsyncType:
     ANY = "any_events"
 
+    ACCOUNT_CONFIRMATION_REQUESTED = "account_confirmation_requested"
+    ACCOUNT_CHANGE_EMAIL_REQUESTED = "account_change_email_requested"
+    ACCOUNT_DELETE_REQUESTED = "account_delete_requested"
+
     ADDRESS_CREATED = "address_created"
     ADDRESS_UPDATED = "address_updated"
     ADDRESS_DELETED = "address_deleted"
@@ -61,12 +65,16 @@ class WebhookEventAsyncType:
 
     ORDER_CREATED = "order_created"
     ORDER_CONFIRMED = "order_confirmed"
+    ORDER_PAID = "order_paid"
     ORDER_FULLY_PAID = "order_fully_paid"
+    ORDER_REFUNDED = "order_refunded"
+    ORDER_FULLY_REFUNDED = "order_fully_refunded"
     ORDER_UPDATED = "order_updated"
     ORDER_CANCELLED = "order_cancelled"
     ORDER_EXPIRED = "order_expired"
     ORDER_FULFILLED = "order_fulfilled"
     ORDER_METADATA_UPDATED = "order_metadata_updated"
+    ORDER_BULK_CREATED = "order_bulk_created"
 
     FULFILLMENT_CREATED = "fulfillment_created"
     FULFILLMENT_CANCELED = "fulfillment_canceled"
@@ -146,7 +154,6 @@ class WebhookEventAsyncType:
     STAFF_UPDATED = "staff_updated"
     STAFF_DELETED = "staff_deleted"
 
-    TRANSACTION_ACTION_REQUEST = "transaction_action_request"
     TRANSACTION_ITEM_METADATA_UPDATED = "transaction_item_metadata_updated"
 
     TRANSLATION_CREATED = "translation_created"
@@ -168,6 +175,9 @@ class WebhookEventAsyncType:
 
     DISPLAY_LABELS = {
         ANY: "Any events",
+        ACCOUNT_CONFIRMATION_REQUESTED: "Account confirmation requested",
+        ACCOUNT_CHANGE_EMAIL_REQUESTED: "Account change email requested",
+        ACCOUNT_DELETE_REQUESTED: "Account delete requested",
         ADDRESS_CREATED: "Address created",
         ADDRESS_UPDATED: "Address updated",
         ADDRESS_DELETED: "Address deleted",
@@ -202,12 +212,16 @@ class WebhookEventAsyncType:
         MENU_ITEM_DELETED: "Menu item deleted",
         ORDER_CREATED: "Order created",
         ORDER_CONFIRMED: "Order confirmed",
-        ORDER_FULLY_PAID: "Order paid",
+        ORDER_PAID: "Order paid",
+        ORDER_FULLY_PAID: "Order fully paid",
+        ORDER_REFUNDED: "Order refunded",
+        ORDER_FULLY_REFUNDED: "Order fully refunded",
         ORDER_UPDATED: "Order updated",
         ORDER_CANCELLED: "Order cancelled",
         ORDER_EXPIRED: "Order expired",
         ORDER_FULFILLED: "Order fulfilled",
         ORDER_METADATA_UPDATED: "Order metadata updated",
+        ORDER_BULK_CREATED: "Order bulk created",
         DRAFT_ORDER_CREATED: "Draft order created",
         DRAFT_ORDER_UPDATED: "Draft order updated",
         DRAFT_ORDER_DELETED: "Draft order deleted",
@@ -268,7 +282,6 @@ class WebhookEventAsyncType:
         STAFF_CREATED: "Staff created",
         STAFF_UPDATED: "Staff updated",
         STAFF_DELETED: "Staff deleted",
-        TRANSACTION_ACTION_REQUEST: "Payment action request",
         TRANSACTION_ITEM_METADATA_UPDATED: "Transaction item metadata updated",
         TRANSLATION_CREATED: "Create translation",
         TRANSLATION_UPDATED: "Update translation",
@@ -286,6 +299,15 @@ class WebhookEventAsyncType:
 
     CHOICES = [
         (ANY, DISPLAY_LABELS[ANY]),
+        (
+            ACCOUNT_CONFIRMATION_REQUESTED,
+            DISPLAY_LABELS[ACCOUNT_CONFIRMATION_REQUESTED],
+        ),
+        (
+            ACCOUNT_CHANGE_EMAIL_REQUESTED,
+            DISPLAY_LABELS[ACCOUNT_CHANGE_EMAIL_REQUESTED],
+        ),
+        (ACCOUNT_DELETE_REQUESTED, DISPLAY_LABELS[ACCOUNT_DELETE_REQUESTED]),
         (ADDRESS_CREATED, DISPLAY_LABELS[ADDRESS_CREATED]),
         (ADDRESS_UPDATED, DISPLAY_LABELS[ADDRESS_UPDATED]),
         (ADDRESS_DELETED, DISPLAY_LABELS[ADDRESS_DELETED]),
@@ -320,12 +342,16 @@ class WebhookEventAsyncType:
         (MENU_ITEM_DELETED, DISPLAY_LABELS[MENU_ITEM_DELETED]),
         (ORDER_CREATED, DISPLAY_LABELS[ORDER_CREATED]),
         (ORDER_CONFIRMED, DISPLAY_LABELS[ORDER_CONFIRMED]),
+        (ORDER_PAID, DISPLAY_LABELS[ORDER_PAID]),
         (ORDER_FULLY_PAID, DISPLAY_LABELS[ORDER_FULLY_PAID]),
+        (ORDER_REFUNDED, DISPLAY_LABELS[ORDER_REFUNDED]),
+        (ORDER_FULLY_REFUNDED, DISPLAY_LABELS[ORDER_FULLY_REFUNDED]),
         (ORDER_UPDATED, DISPLAY_LABELS[ORDER_UPDATED]),
         (ORDER_CANCELLED, DISPLAY_LABELS[ORDER_CANCELLED]),
         (ORDER_EXPIRED, DISPLAY_LABELS[ORDER_EXPIRED]),
         (ORDER_FULFILLED, DISPLAY_LABELS[ORDER_FULFILLED]),
         (ORDER_METADATA_UPDATED, DISPLAY_LABELS[ORDER_METADATA_UPDATED]),
+        (ORDER_BULK_CREATED, DISPLAY_LABELS[ORDER_BULK_CREATED]),
         (DRAFT_ORDER_CREATED, DISPLAY_LABELS[DRAFT_ORDER_CREATED]),
         (DRAFT_ORDER_UPDATED, DISPLAY_LABELS[DRAFT_ORDER_UPDATED]),
         (DRAFT_ORDER_DELETED, DISPLAY_LABELS[DRAFT_ORDER_DELETED]),
@@ -392,7 +418,6 @@ class WebhookEventAsyncType:
         (STAFF_CREATED, DISPLAY_LABELS[STAFF_CREATED]),
         (STAFF_UPDATED, DISPLAY_LABELS[STAFF_UPDATED]),
         (STAFF_DELETED, DISPLAY_LABELS[STAFF_DELETED]),
-        (TRANSACTION_ACTION_REQUEST, DISPLAY_LABELS[TRANSACTION_ACTION_REQUEST]),
         (
             TRANSACTION_ITEM_METADATA_UPDATED,
             DISPLAY_LABELS[TRANSACTION_ITEM_METADATA_UPDATED],
@@ -414,6 +439,9 @@ class WebhookEventAsyncType:
     ALL = [event[0] for event in CHOICES]
 
     PERMISSIONS = {
+        ACCOUNT_CONFIRMATION_REQUESTED: AccountPermissions.MANAGE_USERS,
+        ACCOUNT_CHANGE_EMAIL_REQUESTED: AccountPermissions.MANAGE_USERS,
+        ACCOUNT_DELETE_REQUESTED: AccountPermissions.MANAGE_USERS,
         ADDRESS_CREATED: AccountPermissions.MANAGE_USERS,
         ADDRESS_UPDATED: AccountPermissions.MANAGE_USERS,
         ADDRESS_DELETED: AccountPermissions.MANAGE_USERS,
@@ -448,12 +476,16 @@ class WebhookEventAsyncType:
         MENU_ITEM_DELETED: MenuPermissions.MANAGE_MENUS,
         ORDER_CREATED: OrderPermissions.MANAGE_ORDERS,
         ORDER_CONFIRMED: OrderPermissions.MANAGE_ORDERS,
+        ORDER_PAID: OrderPermissions.MANAGE_ORDERS,
         ORDER_FULLY_PAID: OrderPermissions.MANAGE_ORDERS,
+        ORDER_REFUNDED: OrderPermissions.MANAGE_ORDERS,
+        ORDER_FULLY_REFUNDED: OrderPermissions.MANAGE_ORDERS,
         ORDER_UPDATED: OrderPermissions.MANAGE_ORDERS,
         ORDER_CANCELLED: OrderPermissions.MANAGE_ORDERS,
         ORDER_EXPIRED: OrderPermissions.MANAGE_ORDERS,
         ORDER_FULFILLED: OrderPermissions.MANAGE_ORDERS,
         ORDER_METADATA_UPDATED: OrderPermissions.MANAGE_ORDERS,
+        ORDER_BULK_CREATED: OrderPermissions.MANAGE_ORDERS,
         DRAFT_ORDER_CREATED: OrderPermissions.MANAGE_ORDERS,
         DRAFT_ORDER_DELETED: OrderPermissions.MANAGE_ORDERS,
         DRAFT_ORDER_UPDATED: OrderPermissions.MANAGE_ORDERS,
@@ -514,7 +546,6 @@ class WebhookEventAsyncType:
         STAFF_CREATED: AccountPermissions.MANAGE_STAFF,
         STAFF_UPDATED: AccountPermissions.MANAGE_STAFF,
         STAFF_DELETED: AccountPermissions.MANAGE_STAFF,
-        TRANSACTION_ACTION_REQUEST: PaymentPermissions.HANDLE_PAYMENTS,
         TRANSACTION_ITEM_METADATA_UPDATED: PaymentPermissions.HANDLE_PAYMENTS,
         TRANSLATION_CREATED: SitePermissions.MANAGE_TRANSLATIONS,
         TRANSLATION_UPDATED: SitePermissions.MANAGE_TRANSLATIONS,
@@ -624,10 +655,15 @@ class WebhookEventSyncType:
         PAYMENT_VOID,
     ]
 
+    # Events that are used only in the mutation logic can be excluded from the
+    # circular query check.
     ALLOWED_IN_CIRCULAR_QUERY = [
         PAYMENT_GATEWAY_INITIALIZE_SESSION,
         TRANSACTION_INITIALIZE_SESSION,
         TRANSACTION_PROCESS_SESSION,
+        TRANSACTION_CHARGE_REQUESTED,
+        TRANSACTION_REFUND_REQUESTED,
+        TRANSACTION_CANCELATION_REQUESTED,
     ]
 
     PERMISSIONS = {

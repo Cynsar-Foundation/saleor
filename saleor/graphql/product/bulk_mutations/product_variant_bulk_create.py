@@ -24,6 +24,7 @@ from ...channel import ChannelContext
 from ...core.descriptions import (
     ADDED_IN_311,
     ADDED_IN_312,
+    ADDED_IN_314,
     DEPRECATED_IN_3X_FIELD,
     PREVIEW_FEATURE,
 )
@@ -48,10 +49,7 @@ from ...core.validators import validate_price_precision
 from ...plugins.dataloaders import get_plugin_manager_promise
 from ..mutations.channels import ProductVariantChannelListingAddInput
 from ..mutations.product.product_create import StockInput
-from ..mutations.product_variant.product_variant_create import (
-    ProductVariantCreate,
-    ProductVariantInput,
-)
+from ..mutations.product_variant.product_variant_create import ProductVariantInput
 from ..types import ProductVariant
 from ..utils import clean_variant_sku, get_used_variants_attribute_values
 
@@ -124,7 +122,10 @@ class ProductVariantBulkResult(BaseObjectType):
 
 
 class BulkAttributeValueInput(BaseInputObjectType):
-    id = graphene.ID(description="ID of the selected attribute.")
+    id = graphene.ID(description="ID of the selected attribute.", required=False)
+    external_reference = graphene.String(
+        description="External ID of this attribute." + ADDED_IN_314, required=False
+    )
     values = NonNullList(
         graphene.String,
         required=False,
@@ -250,7 +251,6 @@ class ProductVariantBulkCreate(BaseMutation):
         )
         error_policy = ErrorPolicyEnum(
             required=False,
-            default_value=ErrorPolicyEnum.REJECT_EVERYTHING.value,
             description=(
                 "Policies of error handling. DEFAULT: "
                 + ErrorPolicyEnum.REJECT_EVERYTHING.name
@@ -275,6 +275,7 @@ class ProductVariantBulkCreate(BaseMutation):
         product_type,
         variant_attributes,
         variant_attributes_ids,
+        variant_attributes_external_refs,
         used_attribute_values,
         errors,
         variant_index,
@@ -282,8 +283,17 @@ class ProductVariantBulkCreate(BaseMutation):
     ):
         attributes_errors_count = 0
         if attributes_input := cleaned_input.get("attributes"):
-            attributes_ids = {attr["id"] for attr in attributes_input or []}
+            attributes_ids = {
+                attr["id"] for attr in attributes_input if attr.get("id") or []
+            }
+            attrs_external_refs = {
+                attr["external_reference"]
+                for attr in attributes_input
+                if attr.get("external_reference") or []
+            }
             invalid_attributes = attributes_ids - variant_attributes_ids
+            invalid_attributes |= attrs_external_refs - variant_attributes_external_refs
+
             if len(invalid_attributes) > 0:
                 message = "Given attributes are not a variant attributes."
                 code = ProductVariantBulkErrorCode.ATTRIBUTE_CANNOT_BE_ASSIGNED.value
@@ -313,9 +323,6 @@ class ProductVariantBulkCreate(BaseMutation):
                 try:
                     cleaned_attributes = AttributeAssignmentMixin.clean_input(
                         attributes_input, variant_attributes
-                    )
-                    ProductVariantCreate.validate_duplicated_attribute_values(
-                        cleaned_attributes, used_attribute_values, None
                     )
                     cleaned_input["attributes"] = cleaned_attributes
                 except ValidationError as exc:
@@ -690,6 +697,7 @@ class ProductVariantBulkCreate(BaseMutation):
         variant_attributes,
         used_attribute_values,
         variant_attributes_ids,
+        variant_attributes_external_refs,
         duplicated_sku,
         index_error_map,
         index,
@@ -720,6 +728,7 @@ class ProductVariantBulkCreate(BaseMutation):
             variant_data["product_type"],
             variant_attributes,
             variant_attributes_ids,
+            variant_attributes_external_refs,
             used_attribute_values,
             errors,
             index,
@@ -772,6 +781,10 @@ class ProductVariantBulkCreate(BaseMutation):
             graphene.Node.to_global_id("Attribute", variant_attribute.id)
             for variant_attribute in variant_attributes
         }
+        variant_attributes_external_refs = {
+            variant_attribute.external_reference
+            for variant_attribute in variant_attributes
+        }
         used_attribute_values = get_used_variants_attribute_values(product)
 
         duplicated_sku = get_duplicated_values(
@@ -790,6 +803,7 @@ class ProductVariantBulkCreate(BaseMutation):
                 variant_attributes,
                 used_attribute_values,
                 variant_attributes_ids,
+                variant_attributes_external_refs,
                 duplicated_sku,
                 index_error_map,
                 index,
@@ -806,6 +820,9 @@ class ProductVariantBulkCreate(BaseMutation):
                 channel=listing_data["channel"],
                 variant=variant,
                 price_amount=listing_data["price"],
+                # set the discounted price the same as price for now, the discounted
+                # value will be calculated asynchronously in the celery task
+                discounted_price_amount=listing_data["price"],
                 cost_price_amount=listing_data.get("cost_price"),
                 currency=listing_data["channel"].currency_code,
                 preorder_quantity_threshold=listing_data.get("preorder_threshold"),
@@ -908,7 +925,7 @@ class ProductVariantBulkCreate(BaseMutation):
             models.Product,
             cls.get_node_or_error(info, data["product_id"], only_type="Product"),
         )
-        error_policy = data["error_policy"]
+        error_policy = data.get("error_policy", ErrorPolicyEnum.REJECT_EVERYTHING.value)
         errors: dict = defaultdict(list)
         index_error_map: dict = defaultdict(list)
 

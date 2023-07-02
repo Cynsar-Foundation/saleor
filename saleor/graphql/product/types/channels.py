@@ -5,7 +5,7 @@ from typing import List, Optional
 import graphene
 from promise import Promise
 
-from ....core.utils import get_currency_for_country
+from ....core.utils.country import get_active_country
 from ....graphql.core.types import Money, MoneyRange
 from ....permission.enums import ProductPermissions
 from ....product import models
@@ -28,7 +28,6 @@ from ...core.fields import PermissionsField
 from ...core.scalars import Date
 from ...core.tracing import traced_resolver
 from ...core.types import BaseObjectType, ModelObjectType
-from ...discount.dataloaders import DiscountsByDateTimeLoader
 from ...tax.dataloaders import (
     TaxClassByProductIdLoader,
     TaxClassCountryRateByTaxClassIDLoader,
@@ -37,7 +36,6 @@ from ...tax.dataloaders import (
     TaxConfigurationPerCountryByTaxConfigurationIDLoader,
 )
 from ..dataloaders import (
-    CollectionsByProductIdLoader,
     ProductByIdLoader,
     ProductVariantsByProductIdLoader,
     VariantChannelListingByVariantIdAndChannelSlugLoader,
@@ -91,7 +89,12 @@ class ProductChannelListing(ModelObjectType[models.ProductChannelListing]):
         permissions=[ProductPermissions.MANAGE_PRODUCTS],
     )
     is_available_for_purchase = graphene.Boolean(
-        description="Whether the product is available for purchase."
+        description=(
+            "Refers to a state that can be set by admins to control whether a product "
+            "is available for purchase in storefronts in this channel. This does not "
+            "guarantee the availability of stock. When set to `False`, this product is "
+            "still visible to customers, but it cannot be purchased."
+        )
     )
     pricing = graphene.Field(
         "saleor.graphql.product.types.products.ProductPricingInfo",
@@ -212,17 +215,13 @@ class ProductChannelListing(ModelObjectType[models.ProductChannelListing]):
     @staticmethod
     def resolve_pricing(root: models.ProductChannelListing, info, *, address=None):
         context = info.context
-        address_country = address.country if address is not None else None
 
         channel = ChannelByIdLoader(context).load(root.channel_id)
         product = ProductByIdLoader(context).load(root.product_id)
-        variants = ProductVariantsByProductIdLoader(context).load(root.product_id)
-        collections = CollectionsByProductIdLoader(context).load(root.product_id)
-        discounts = DiscountsByDateTimeLoader(context).load(info.context.request_time)
 
         def load_tax_configuration(data):
-            channel, product, variants, collections, discounts = data
-            country_code = address_country or channel.default_country.code
+            channel, product = data
+            country_code = get_active_country(channel, address_data=address)
 
             def load_tax_country_exceptions(tax_config):
                 tax_class = TaxClassByProductIdLoader(info.context).load(product.id)
@@ -241,7 +240,6 @@ class ProductChannelListing(ModelObjectType[models.ProductChannelListing]):
 
                         def calculate_pricing_info(data):
                             country_rates, default_country_rate_obj = data
-                            local_currency = get_currency_for_country(country_code)
 
                             tax_config_country = next(
                                 (
@@ -269,14 +267,8 @@ class ProductChannelListing(ModelObjectType[models.ProductChannelListing]):
                             prices_entered_with_tax = tax_config.prices_entered_with_tax
 
                             availability = get_product_availability(
-                                product=product,
                                 product_channel_listing=root,
-                                variants=variants,
                                 variants_channel_listing=variants_channel_listing,
-                                collections=collections,
-                                discounts=discounts,
-                                channel=channel,
-                                local_currency=local_currency,
                                 prices_entered_with_tax=prices_entered_with_tax,
                                 tax_calculation_strategy=tax_calculation_strategy,
                                 tax_rate=tax_rate,
@@ -317,9 +309,7 @@ class ProductChannelListing(ModelObjectType[models.ProductChannelListing]):
                 .then(load_tax_country_exceptions)
             )
 
-        return Promise.all([channel, product, variants, collections, discounts]).then(
-            load_tax_configuration
-        )
+        return Promise.all([channel, product]).then(load_tax_configuration)
 
 
 class PreorderThreshold(BaseObjectType):
@@ -356,7 +346,7 @@ class ProductVariantChannelListing(
     )
 
     class Meta:
-        description = "Represents product varaint channel listing."
+        description = "Represents product variant channel listing."
         model = models.ProductVariantChannelListing
         interfaces = [graphene.relay.Node]
 

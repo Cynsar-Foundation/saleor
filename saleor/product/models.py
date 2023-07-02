@@ -49,7 +49,7 @@ from ..core.models import (
 from ..core.units import WeightUnits
 from ..core.utils import build_absolute_uri
 from ..core.utils.editorjs import clean_editor_js
-from ..core.utils.translations import Translation, TranslationProxy
+from ..core.utils.translations import Translation, get_translation
 from ..core.weight import zero_weight
 from ..discount import DiscountInfo
 from ..discount.utils import calculate_discounted_price
@@ -94,7 +94,6 @@ class Category(ModelWithMetadata, MPTTModel, SeoModel):
 
     objects = models.Manager()
     tree = TreeManager()  # type: ignore[django-manager-missing]
-    translated = TranslationProxy()
 
     class Meta:
         indexes = [
@@ -419,7 +418,6 @@ class Product(SeoModel, ModelWithMetadata, ModelWithExternalReference):
     )
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     updated_at = models.DateTimeField(auto_now=True, db_index=True)
-    charge_taxes = models.BooleanField(default=True)
     weight = MeasurementField(
         measurement=Weight,
         unit_choices=WeightUnits.CHOICES,
@@ -443,7 +441,6 @@ class Product(SeoModel, ModelWithMetadata, ModelWithExternalReference):
     )
 
     objects = ProductManager()
-    translated = TranslationProxy()
 
     class Meta:
         app_label = "product"
@@ -460,6 +457,11 @@ class Product(SeoModel, ModelWithMetadata, ModelWithExternalReference):
             GinIndex(
                 name="product_tsearch",
                 fields=["search_vector"],
+            ),
+            GinIndex(
+                name="product_gin",
+                fields=["name", "slug"],
+                opclasses=["gin_trgm_ops"] * 2,
             ),
         ]
         indexes.extend(ModelWithMetadata.Meta.indexes)
@@ -621,7 +623,6 @@ class ProductVariant(SortableModel, ModelWithMetadata, ModelWithExternalReferenc
     )
 
     objects = ProductVariantManager()
-    translated = TranslationProxy()
 
     class Meta(ModelWithMetadata.Meta):
         ordering = ("sort_order", "sku")
@@ -633,6 +634,17 @@ class ProductVariant(SortableModel, ModelWithMetadata, ModelWithExternalReferenc
     def get_global_id(self):
         return graphene.Node.to_global_id("ProductVariant", self.id)
 
+    def get_base_price(
+        self,
+        channel_listing: "ProductVariantChannelListing",
+        price_override: Optional["Decimal"] = None,
+    ):
+        return (
+            channel_listing.price
+            if price_override is None
+            else Money(price_override, channel_listing.currency)
+        )
+
     def get_price(
         self,
         product: Product,
@@ -642,16 +654,13 @@ class ProductVariant(SortableModel, ModelWithMetadata, ModelWithExternalReferenc
         discounts: Optional[Iterable[DiscountInfo]] = None,
         price_override: Optional["Decimal"] = None,
     ) -> "Money":
-        price = (
-            channel_listing.price
-            if price_override is None
-            else Money(price_override, channel_listing.currency)
-        )
+        price = self.get_base_price(channel_listing, price_override)
+        collection_ids = {collection.id for collection in collections}
         return calculate_discounted_price(
             product=product,
             price=price,
             discounts=discounts,
-            collections=collections,
+            collection_ids=collection_ids,
             channel=channel,
             variant_id=self.id,
         )
@@ -671,8 +680,8 @@ class ProductVariant(SortableModel, ModelWithMetadata, ModelWithExternalReferenc
 
     def display_product(self, translated: bool = False) -> str:
         if translated:
-            product = self.product.translated
-            variant_display = str(self.translated)
+            product = get_translation(self.product).name
+            variant_display = get_translation(self).name
         else:
             variant_display = str(self)
             product = self.product
@@ -695,8 +704,6 @@ class ProductVariantTranslation(Translation):
         ProductVariant, related_name="translations", on_delete=models.CASCADE
     )
     name = models.CharField(max_length=255, blank=True)
-
-    translated = TranslationProxy()
 
     class Meta:
         unique_together = (("language_code", "product_variant"),)
@@ -767,6 +774,16 @@ class ProductVariantChannelListing(models.Model):
         null=True,
     )
     cost_price = MoneyField(amount_field="cost_price_amount", currency_field="currency")
+
+    discounted_price_amount = models.DecimalField(
+        max_digits=settings.DEFAULT_MAX_DIGITS,
+        decimal_places=settings.DEFAULT_DECIMAL_PLACES,
+        blank=True,
+        null=True,
+    )
+    discounted_price = MoneyField(
+        amount_field="discounted_price_amount", currency_field="currency"
+    )
 
     preorder_quantity_threshold = models.IntegerField(blank=True, null=True)
 
@@ -923,8 +940,6 @@ class Collection(SeoModel, ModelWithMetadata):
     description = SanitizedJSONField(blank=True, null=True, sanitizer=clean_editor_js)
 
     objects = CollectionManager()
-
-    translated = TranslationProxy()
 
     class Meta(ModelWithMetadata.Meta):
         ordering = ("slug",)

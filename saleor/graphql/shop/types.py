@@ -3,10 +3,9 @@ from typing import Optional
 import graphene
 from django.conf import settings
 from django_countries import countries
-from django_prices_vatlayer.models import VAT
 from phonenumbers import COUNTRY_CODE_TO_REGION_CODE
 
-from ... import __version__
+from ... import __version__, schema_version
 from ...account import models as account_models
 from ...channel import models as channel_models
 from ...core.utils import build_absolute_uri
@@ -18,6 +17,7 @@ from ..checkout.types import PaymentGateway
 from ..core.descriptions import (
     ADDED_IN_31,
     ADDED_IN_35,
+    ADDED_IN_314,
     DEPRECATED_IN_3X_FIELD,
     DEPRECATED_IN_3X_INPUT,
 )
@@ -290,6 +290,13 @@ class Shop(graphene.ObjectType):
         required=False,
         permissions=[SitePermissions.MANAGE_SETTINGS],
     )
+    enable_account_confirmation_by_email = PermissionsField(
+        graphene.Boolean,
+        description=(
+            "Determines if account confirmation by email is enabled." + ADDED_IN_314
+        ),
+        permissions=[SitePermissions.MANAGE_SETTINGS],
+    )
     limits = PermissionsField(
         LimitInfo,
         required=True,
@@ -447,9 +454,8 @@ class Shop(graphene.ObjectType):
         default_country_code = settings.DEFAULT_COUNTRY
         default_country_name = countries.countries.get(default_country_code)
         if default_country_name:
-            vat = VAT.objects.filter(country_code=default_country_code).first()
             default_country = CountryDisplay(
-                code=default_country_code, country=default_country_name, vat=vat
+                code=default_country_code, country=default_country_name, vat=None
             )
         else:
             default_country = None
@@ -515,6 +521,11 @@ class Shop(graphene.ObjectType):
         return account_models.StaffNotificationRecipient.objects.all()
 
     @staticmethod
+    @load_site_callback
+    def resolve_enable_account_confirmation_by_email(_, _info, site):
+        return site.settings.enable_account_confirmation_by_email
+
+    @staticmethod
     def resolve_limits(_, _info):
         return LimitInfo(current_usage=Limits(), allowed_usage=Limits())
 
@@ -524,8 +535,7 @@ class Shop(graphene.ObjectType):
 
     @staticmethod
     def resolve_schema_version(_, _info):
-        major, minor, _ = __version__.split(".", 2)
-        return f"{major}.{minor}"
+        return schema_version
 
     # deprecated
 

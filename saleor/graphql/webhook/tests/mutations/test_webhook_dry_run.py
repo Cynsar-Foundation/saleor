@@ -253,10 +253,14 @@ def async_subscription_webhooks_with_root_objects(
     subscription_order_updated_webhook,
     subscription_order_confirmed_webhook,
     subscription_order_fully_paid_webhook,
+    subscription_order_refunded_webhook,
+    subscription_order_fully_refunded_webhook,
+    subscription_order_paid_webhook,
     subscription_order_cancelled_webhook,
     subscription_order_expired_webhook,
     subscription_order_fulfilled_webhook,
     subscription_order_metadata_updated_webhook,
+    subscription_order_bulk_created_webhook,
     subscription_draft_order_created_webhook,
     subscription_draft_order_updated_webhook,
     subscription_draft_order_deleted_webhook,
@@ -399,6 +403,9 @@ def async_subscription_webhooks_with_root_objects(
         events.ORDER_UPDATED: [subscription_order_updated_webhook, order],
         events.ORDER_CONFIRMED: [subscription_order_confirmed_webhook, order],
         events.ORDER_FULLY_PAID: [subscription_order_fully_paid_webhook, order],
+        events.ORDER_PAID: [subscription_order_paid_webhook, order],
+        events.ORDER_REFUNDED: [subscription_order_refunded_webhook, order],
+        events.ORDER_FULLY_REFUNDED: [subscription_order_fully_refunded_webhook, order],
         events.ORDER_FULFILLED: [subscription_order_fulfilled_webhook, order],
         events.ORDER_CANCELLED: [subscription_order_cancelled_webhook, order],
         events.ORDER_EXPIRED: [subscription_order_expired_webhook, order],
@@ -406,6 +413,7 @@ def async_subscription_webhooks_with_root_objects(
             subscription_order_metadata_updated_webhook,
             order,
         ],
+        events.ORDER_BULK_CREATED: [subscription_order_bulk_created_webhook, order],
         events.DRAFT_ORDER_CREATED: [subscription_draft_order_created_webhook, order],
         events.DRAFT_ORDER_UPDATED: [subscription_draft_order_updated_webhook, order],
         events.DRAFT_ORDER_DELETED: [subscription_draft_order_deleted_webhook, order],
@@ -595,6 +603,7 @@ def test_webhook_dry_run_root_type(
     for event_name, event_type in WEBHOOK_TYPES_MAP.items():
         if not event_type._meta.enable_dry_run:
             continue
+
         webhook = async_subscription_webhooks_with_root_objects[event_name][0]
         object = async_subscription_webhooks_with_root_objects[event_name][1]
         object_id = graphene.Node.to_global_id(object.__class__.__name__, object.pk)
@@ -607,7 +616,9 @@ def test_webhook_dry_run_root_type(
 
         # then
         assert not content["data"]["webhookDryRun"]["errors"]
-        assert content["data"]["webhookDryRun"]["payload"]
+        payload = content["data"]["webhookDryRun"]["payload"]
+        assert payload
+        assert not json.loads(payload).get("errors")
 
 
 def test_webhook_dry_run_root_type_for_transaction_item_metadata_updated(

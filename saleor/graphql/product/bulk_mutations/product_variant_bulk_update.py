@@ -139,7 +139,6 @@ class ProductVariantBulkUpdate(BaseMutation):
         )
         error_policy = ErrorPolicyEnum(
             required=False,
-            default_value=ErrorPolicyEnum.REJECT_EVERYTHING.value,
             description=(
                 "Policies of error handling. DEFAULT: "
                 + ErrorPolicyEnum.REJECT_EVERYTHING.name
@@ -350,6 +349,7 @@ class ProductVariantBulkUpdate(BaseMutation):
         variant_attributes,
         used_attribute_values,
         variant_attributes_ids,
+        variant_attributes_external_refs,
         duplicated_sku,
         index_error_map,
         index,
@@ -379,6 +379,7 @@ class ProductVariantBulkUpdate(BaseMutation):
             variant_data["product_type"],
             variant_attributes,
             variant_attributes_ids,
+            variant_attributes_external_refs,
             used_attribute_values,
             None,
             index,
@@ -453,6 +454,10 @@ class ProductVariantBulkUpdate(BaseMutation):
             graphene.Node.to_global_id("Attribute", variant_attribute.id)
             for variant_attribute in variant_attributes
         }
+        variant_attributes_external_refs = {
+            variant_attribute.external_reference
+            for variant_attribute in variant_attributes
+        }
         duplicated_sku = get_duplicated_values(
             [variant.sku for variant in variants if variant.sku]
         )
@@ -485,6 +490,7 @@ class ProductVariantBulkUpdate(BaseMutation):
                 variant_attributes,
                 used_attribute_values,
                 variant_attributes_ids,
+                variant_attributes_external_refs,
                 duplicated_sku,
                 index_error_map,
                 index,
@@ -558,6 +564,9 @@ class ProductVariantBulkUpdate(BaseMutation):
                     channel=listing_data["channel"],
                     variant=variant,
                     price_amount=listing_data["price"],
+                    # set the discounted price the same as price for now, the discounted
+                    # value will be calculated asynchronously in the celery task
+                    discounted_price_amount=listing_data["price"],
                     cost_price_amount=listing_data.get("cost_price"),
                     currency=listing_data["channel"].currency_code,
                     preorder_quantity_threshold=listing_data.get("preorder_threshold"),
@@ -574,6 +583,9 @@ class ProductVariantBulkUpdate(BaseMutation):
                     ]
                 if "price" in listing_data:
                     listing.price_amount = listing_data["price"]
+                    # set the discounted price the same as price for now, the discounted
+                    # value will be calculated asynchronously in the celery task
+                    listing.discounted_price_amount = listing_data["price"]
                 if "cost_price" in listing_data:
                     listing.cost_price_amount = listing_data["cost_price"]
                 listings_to_update.append(listing)
@@ -657,7 +669,7 @@ class ProductVariantBulkUpdate(BaseMutation):
     @traced_atomic_transaction()
     def perform_mutation(cls, _root, info, **data):
         index_error_map: dict = defaultdict(list)
-        error_policy = data["error_policy"]
+        error_policy = data.get("error_policy", ErrorPolicyEnum.REJECT_EVERYTHING.value)
         product = cast(
             models.Product,
             cls.get_node_or_error(info, data["product_id"], only_type="Product"),

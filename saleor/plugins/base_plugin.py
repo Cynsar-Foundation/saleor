@@ -46,7 +46,6 @@ if TYPE_CHECKING:
     from ..core.middleware import Requestor
     from ..core.notify_events import NotifyEventType
     from ..core.taxes import TaxData, TaxType
-    from ..discount import DiscountInfo
     from ..discount.models import Sale, Voucher
     from ..giftcard.models import GiftCard
     from ..invoice.models import Invoice
@@ -150,6 +149,26 @@ class BasePlugin:
     def __str__(self):
         return self.PLUGIN_NAME
 
+    # Trigger when account confirmation is requested.
+    #
+    # Overwrite this method if you need to trigger specific logic after an account
+    # confirmation is requested.
+    account_confirmation_requested: Callable[
+        ["User", str, str, Optional[str], None], None
+    ]
+
+    # Trigger when account change email is requested.
+    #
+    # Overwrite this method if you need to trigger specific logic after an account
+    # change email is requested.
+    account_change_email_requested: Callable[["User", str, str, str, str, None], None]
+
+    # Trigger when account delete is requested.
+    #
+    # Overwrite this method if you need to trigger specific logic after an account
+    # delete is requested.
+    account_delete_requested: Callable[["User", str, str, str, None], None]
+
     # Trigger when address is created.
     #
     # Overwrite this method if you need to trigger specific logic after an address is
@@ -248,7 +267,6 @@ class BasePlugin:
             List["CheckoutLineInfo"],
             "CheckoutLineInfo",
             Union["Address", None],
-            Iterable["DiscountInfo"],
             TaxedMoney,
         ],
         TaxedMoney,
@@ -261,7 +279,6 @@ class BasePlugin:
             List["CheckoutLineInfo"],
             "CheckoutLineInfo",
             Union["Address", None],
-            Iterable["DiscountInfo"],
             Any,
         ],
         TaxedMoney,
@@ -276,7 +293,6 @@ class BasePlugin:
             "CheckoutInfo",
             List["CheckoutLineInfo"],
             Union["Address", None],
-            List["DiscountInfo"],
             TaxedMoney,
         ],
         TaxedMoney,
@@ -291,7 +307,20 @@ class BasePlugin:
             "CheckoutInfo",
             List["CheckoutLineInfo"],
             Union["Address", None],
-            List["DiscountInfo"],
+            TaxedMoney,
+        ],
+        TaxedMoney,
+    ]
+
+    # Calculate the subtotal for checkout.
+    #
+    # Overwrite this method if you need to apply specific logic for the calculation
+    # of a checkout subtotal. Return TaxedMoney.
+    calculate_checkout_subtotal: Callable[
+        [
+            "CheckoutInfo",
+            List["CheckoutLineInfo"],
+            Union["Address", None],
             TaxedMoney,
         ],
         TaxedMoney,
@@ -374,7 +403,7 @@ class BasePlugin:
     channel_status_changed: Callable[["Channel", None], None]
 
     change_user_address: Callable[
-        ["Address", Union[str, None], Union["User", None], "Address", bool], "Address"
+        ["Address", Union[str, None], Union["User", None], bool, "Address"], "Address"
     ]
 
     # Retrieves the balance remaining on a shopper's gift card
@@ -517,7 +546,6 @@ class BasePlugin:
             List["CheckoutLineInfo"],
             "CheckoutLineInfo",
             Union["Address", None],
-            Iterable["DiscountInfo"],
             Decimal,
         ],
         Decimal,
@@ -528,7 +556,6 @@ class BasePlugin:
             "CheckoutInfo",
             Iterable["CheckoutLineInfo"],
             Union["Address", None],
-            Iterable["DiscountInfo"],
             Any,
         ],
         Any,
@@ -699,6 +726,24 @@ class BasePlugin:
     # fully paid.
     order_fully_paid: Callable[["Order", Any], Any]
 
+    # Trigger when order is paid.
+    #
+    # Overwrite this method if you need to trigger specific logic when an order is
+    # received the payment.
+    order_paid: Callable[["Order", Any], Any]
+
+    # Trigger when order is refunded.
+    #
+    # Overwrite this method if you need to trigger specific logic when an order is
+    # refunded.
+    order_refunded: Callable[["Order", Any], Any]
+
+    # Trigger when order is fully refunded.
+    #
+    # Overwrite this method if you need to trigger specific logic when an order is
+    # fully refunded.
+    order_fully_refunded: Callable[["Order", Any], Any]
+
     # Trigger when order is updated.
     #
     # Overwrite this method if you need to trigger specific logic when an order is
@@ -710,6 +755,12 @@ class BasePlugin:
     # Overwrite this method if you need to trigger specific logic when an order
     # metadata is changed.
     order_metadata_updated: Callable[["Order", Any], Any]
+
+    # Trigger when orders are imported.
+    #
+    # Overwrite this method if you need to trigger specific logic when an order
+    # is imported.
+    order_bulk_created: Callable[[List["Order"], Any], Any]
 
     # Trigger when page is created.
     #
@@ -772,7 +823,6 @@ class BasePlugin:
     preprocess_order_creation: Callable[
         [
             "CheckoutInfo",
-            List["DiscountInfo"],
             Union[Iterable["CheckoutLineInfo"], None],
             Any,
         ],
@@ -780,8 +830,6 @@ class BasePlugin:
     ]
 
     process_payment: Callable[["PaymentData", Any], Any]
-
-    transaction_action_request: Callable[["TransactionActionData", None], None]
 
     transaction_charge_requested: Callable[["TransactionActionData", None], None]
 

@@ -17,9 +17,9 @@ from prices import Money, fixed_discount, percentage_discount
 
 from ..channel.models import Channel
 from ..core.models import ModelWithMetadata
-from ..core.utils.translations import Translation, TranslationProxy
+from ..core.utils.translations import Translation
 from ..permission.enums import DiscountPermissions
-from . import DiscountValueType, OrderDiscountType, VoucherType
+from . import DiscountType, DiscountValueType, VoucherType
 
 if TYPE_CHECKING:
     from ..account.models import User
@@ -95,7 +95,6 @@ class Voucher(ModelWithMetadata):
     categories = models.ManyToManyField("product.Category", blank=True)
 
     objects = VoucherManager()
-    translated = TranslationProxy()
 
     class Meta:
         ordering = ("code",)
@@ -272,7 +271,6 @@ class Sale(ModelWithMetadata):
     notification_sent_datetime = models.DateTimeField(null=True, blank=True)
 
     objects = SaleManager()
-    translated = TranslationProxy()
 
     class Meta:
         ordering = ("name", "pk")
@@ -358,21 +356,13 @@ class SaleTranslation(Translation):
         return {"name": self.name}
 
 
-class OrderDiscount(models.Model):
+class BaseDiscount(models.Model):
     id = models.UUIDField(primary_key=True, editable=False, unique=True, default=uuid4)
-    old_id = models.PositiveIntegerField(unique=True, null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    order = models.ForeignKey(
-        "order.Order",
-        related_name="discounts",
-        blank=True,
-        null=True,
-        on_delete=models.CASCADE,
-    )
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     type = models.CharField(
         max_length=10,
-        choices=OrderDiscountType.CHOICES,
-        default=OrderDiscountType.MANUAL,
+        choices=DiscountType.CHOICES,
+        default=DiscountType.MANUAL,
     )
     value_type = models.CharField(
         max_length=10,
@@ -384,7 +374,6 @@ class OrderDiscount(models.Model):
         decimal_places=settings.DEFAULT_DECIMAL_PLACES,
         default=Decimal("0.0"),
     )
-
     amount_value = models.DecimalField(
         max_digits=settings.DEFAULT_MAX_DIGITS,
         decimal_places=settings.DEFAULT_DECIMAL_PLACES,
@@ -394,12 +383,44 @@ class OrderDiscount(models.Model):
     currency = models.CharField(
         max_length=settings.DEFAULT_CURRENCY_CODE_LENGTH,
     )
-
     name = models.CharField(max_length=255, null=True, blank=True)
     translated_name = models.CharField(max_length=255, null=True, blank=True)
     reason = models.TextField(blank=True, null=True)
+    sale = models.ForeignKey(
+        Sale, related_name="+", blank=True, null=True, on_delete=models.SET_NULL
+    )
+    voucher = models.ForeignKey(
+        Voucher, related_name="+", blank=True, null=True, on_delete=models.SET_NULL
+    )
+
+    class Meta:
+        abstract = True
+
+
+class OrderDiscount(BaseDiscount):
+    order = models.ForeignKey(
+        "order.Order",
+        related_name="discounts",
+        blank=True,
+        null=True,
+        on_delete=models.CASCADE,
+    )
+    old_id = models.PositiveIntegerField(unique=True, null=True, blank=True)
 
     class Meta:
         # Orders searching index
         indexes = [GinIndex(fields=["name", "translated_name"])]
+        ordering = ("created_at", "id")
+
+
+class CheckoutLineDiscount(BaseDiscount):
+    line = models.ForeignKey(
+        "checkout.CheckoutLine",
+        related_name="discounts",
+        blank=True,
+        null=True,
+        on_delete=models.CASCADE,
+    )
+
+    class Meta:
         ordering = ("created_at", "id")
