@@ -36,6 +36,8 @@ from ..descriptions import (
 from ..enums import (
     AccountErrorCode,
     AppErrorCode,
+    AttributeBulkCreateErrorCode,
+    AttributeBulkUpdateErrorCode,
     AttributeErrorCode,
     AttributeTranslateErrorCode,
     AttributeValueTranslateErrorCode,
@@ -61,16 +63,23 @@ from ..enums import (
     PaymentErrorCode,
     PaymentGatewayConfigErrorCode,
     PaymentGatewayInitializeErrorCode,
+    PaymentGatewayInitializeTokenizationErrorCode,
+    PaymentMethodInitializeTokenizationErrorCode,
+    PaymentMethodProcessTokenizationErrorCode,
     PermissionEnum,
     PermissionGroupErrorCode,
     PluginErrorCode,
     ProductBulkCreateErrorCode,
     ProductErrorCode,
+    ProductTranslateErrorCode,
     ProductVariantBulkErrorCode,
+    ProductVariantTranslateErrorCode,
+    SendConfirmationEmailErrorCode,
     ShippingErrorCode,
     ShopErrorCode,
     StockBulkUpdateErrorCode,
     StockErrorCode,
+    StoredPaymentMethodRequestDeleteErrorCode,
     ThumbnailFormatEnum,
     TimePeriodTypeEnum,
     TransactionCreateErrorCode,
@@ -177,6 +186,13 @@ class AccountError(Error):
 
     class Meta:
         description = "Represents errors in account mutations."
+        doc_category = DOC_CATEGORY_USERS
+
+
+class SendConfirmationEmailError(Error):
+    code = SendConfirmationEmailErrorCode(description="The error code.", required=True)
+
+    class Meta:
         doc_category = DOC_CATEGORY_USERS
 
 
@@ -432,6 +448,20 @@ class CollectionChannelListingError(ProductError):
         doc_category = DOC_CATEGORY_PRODUCTS
 
 
+class AttributeBulkCreateError(BulkError):
+    code = AttributeBulkCreateErrorCode(description="The error code.", required=True)
+
+    class Meta:
+        doc_category = DOC_CATEGORY_ATTRIBUTES
+
+
+class AttributeBulkUpdateError(BulkError):
+    code = AttributeBulkUpdateErrorCode(description="The error code.", required=True)
+
+    class Meta:
+        doc_category = DOC_CATEGORY_ATTRIBUTES
+
+
 class BulkProductError(ProductError):
     index = graphene.Int(
         description="Index of an input list item that caused the error."
@@ -575,6 +605,16 @@ class PaymentError(Error):
         doc_category = DOC_CATEGORY_PAYMENTS
 
 
+class ProductBulkTranslateError(BulkError):
+    code = ProductTranslateErrorCode(description="The error code.", required=True)
+
+
+class ProductVariantBulkTranslateError(BulkError):
+    code = ProductVariantTranslateErrorCode(
+        description="The error code.", required=True
+    )
+
+
 class TransactionCreateError(Error):
     code = TransactionCreateErrorCode(description="The error code.", required=True)
 
@@ -637,6 +677,42 @@ class PaymentGatewayConfigError(Error):
 
 class PaymentGatewayInitializeError(Error):
     code = PaymentGatewayInitializeErrorCode(
+        description="The error code.", required=True
+    )
+
+    class Meta:
+        doc_category = DOC_CATEGORY_PAYMENTS
+
+
+class PaymentMethodRequestDeleteError(Error):
+    code = StoredPaymentMethodRequestDeleteErrorCode(
+        description="The error code.", required=True
+    )
+
+    class Meta:
+        doc_category = DOC_CATEGORY_PAYMENTS
+
+
+class PaymentGatewayInitializeTokenizationError(Error):
+    code = PaymentGatewayInitializeTokenizationErrorCode(
+        description="The error code.", required=True
+    )
+
+    class Meta:
+        doc_category = DOC_CATEGORY_PAYMENTS
+
+
+class PaymentMethodInitializeTokenizationError(Error):
+    code = PaymentMethodInitializeTokenizationErrorCode(
+        description="The error code.", required=True
+    )
+
+    class Meta:
+        doc_category = DOC_CATEGORY_PAYMENTS
+
+
+class PaymentMethodProcessTokenizationError(Error):
+    code = PaymentMethodProcessTokenizationErrorCode(
         description="The error code.", required=True
     )
 

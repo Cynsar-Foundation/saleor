@@ -5,6 +5,8 @@ import graphene
 from ......account import events as account_events
 from ......account.error_codes import AccountErrorCode
 from ......account.search import generate_address_search_document_value
+from ......giftcard.models import GiftCard
+from ......giftcard.search import update_gift_cards_search_vector
 from .....tests.utils import get_graphql_content
 from ....tests.utils import convert_dict_keys_to_camel_case
 
@@ -29,9 +31,17 @@ CUSTOMER_UPDATE_MUTATION = """
                 lastName
                 defaultBillingAddress {
                     id
+                    metadata {
+                        key
+                        value
+                    }
                 }
                 defaultShippingAddress {
                     id
+                    metadata {
+                        key
+                        value
+                    }
                 }
                 languageCode
                 isActive
@@ -76,14 +86,14 @@ def test_customer_update(
     note = "Test update note"
     external_reference = "test-ext-ref"
     address_data = convert_dict_keys_to_camel_case(address.as_data())
-    address_data.pop("metadata")
+    metadata = [{"key": "test key", "value": "test value"}]
+    private_metadata = [{"key": "private test key", "value": "private test value"}]
+    address_data["metadata"] = metadata
+    stored_metadata = {"test key": "test value"}
     address_data.pop("privateMetadata")
 
     new_street_address = "Updated street address"
     address_data["streetAddress1"] = new_street_address
-
-    metadata = {"key": "test key", "value": "test value"}
-    private_metadata = {"key": "private test key", "value": "private test value"}
 
     variables = {
         "id": user_id,
@@ -96,8 +106,8 @@ def test_customer_update(
             "defaultBillingAddress": address_data,
             "defaultShippingAddress": address_data,
             "languageCode": "PL",
-            "metadata": [metadata],
-            "privateMetadata": [private_metadata],
+            "metadata": metadata,
+            "privateMetadata": private_metadata,
         },
     }
 
@@ -117,8 +127,10 @@ def test_customer_update(
     assert data["user"]["languageCode"] == "PL"
     assert data["user"]["externalReference"] == external_reference
     assert not data["user"]["isActive"]
-    assert metadata in data["user"]["metadata"]
-    assert private_metadata in data["user"]["privateMetadata"]
+    assert metadata[0] in data["user"]["metadata"]
+    assert private_metadata[0] in data["user"]["privateMetadata"]
+    assert data["user"]["defaultShippingAddress"]["metadata"] == metadata
+    assert data["user"]["defaultBillingAddress"]["metadata"] == metadata
 
     customer_user.refresh_from_db()
 
@@ -130,9 +142,11 @@ def test_customer_update(
     assert billing_address.pk == billing_address_pk
     assert shipping_address.pk == shipping_address_pk
 
+    assert billing_address.metadata == stored_metadata
+    assert billing_address.metadata == stored_metadata
+
     assert billing_address.street_address_1 == new_street_address
     assert shipping_address.street_address_1 == new_street_address
-
     (
         name_changed_event,
         deactivated_event,
@@ -525,5 +539,110 @@ def test_customer_update_assign_gift_cards_and_orders(
     customer_user.refresh_from_db()
     assert gift_card.created_by == customer_user
     assert gift_card.created_by_email == customer_user.email
+    order.refresh_from_db()
+    assert order.user == customer_user
+
+
+def test_customer_update_trigger_gift_card_search_vector_update(
+    staff_api_client,
+    customer_user,
+    gift_card_list,
+    permission_manage_users,
+):
+    # given
+    query = UPDATE_CUSTOMER_EMAIL_MUTATION
+
+    user_id = graphene.Node.to_global_id("User", customer_user.id)
+    new_email = "mirumee@example.com"
+
+    gift_card_1, gift_card_2, gift_card_3 = gift_card_list
+    gift_card_1.created_by = customer_user
+    gift_card_2.used_by = customer_user
+    gift_card_3.used_by_email = new_email
+    GiftCard.objects.bulk_update(
+        gift_card_list, ["created_by", "used_by", "used_by_email"]
+    )
+
+    update_gift_cards_search_vector(gift_card_list)
+    for card in gift_card_list:
+        card.refresh_from_db()
+        assert card.search_index_dirty is False
+
+    variables = {
+        "id": user_id,
+        "email": new_email,
+    }
+
+    # when
+    response = staff_api_client.post_graphql(
+        query, variables, permissions=[permission_manage_users]
+    )
+
+    # then
+    content = get_graphql_content(response)
+    assert not content["data"]["customerUpdate"]["errors"]
+    customer_user.refresh_from_db()
+    assert customer_user.email == new_email
+    for card in gift_card_list:
+        card.refresh_from_db()
+        assert card.search_index_dirty is True
+
+
+UPDATE_CUSTOMER_IS_CONFIRMED_MUTATION = """
+    mutation UpdateCustomer(
+        $id: ID!, $isConfirmed: Boolean) {
+            customerUpdate(id: $id, input: {
+            isConfirmed: $isConfirmed,
+        }) {
+            errors {
+                field
+                message
+            }
+        }
+    }
+"""
+
+
+def test_customer_confirm_assign_gift_cards_and_orders(
+    staff_api_client,
+    staff_user,
+    customer_user,
+    address,
+    gift_card,
+    order,
+    permission_manage_users,
+):
+    # given
+    query = UPDATE_CUSTOMER_IS_CONFIRMED_MUTATION
+
+    customer_user.is_confirmed = False
+    customer_user.save()
+
+    user_id = graphene.Node.to_global_id("User", customer_user.id)
+
+    gift_card.created_by = None
+    gift_card.created_by_email = customer_user.email
+    gift_card.save(update_fields=["created_by", "created_by_email"])
+
+    order.user = None
+    order.user_email = customer_user.email
+    order.save(update_fields=["user_email", "user"])
+
+    variables = {
+        "id": user_id,
+        "isConfirmed": True,
+    }
+
+    # when
+    staff_api_client.post_graphql(
+        query, variables, permissions=[permission_manage_users]
+    )
+
+    # then
+    gift_card.refresh_from_db()
+    customer_user.refresh_from_db()
+    assert gift_card.created_by == customer_user
+    assert gift_card.created_by_email == customer_user.email
+
     order.refresh_from_db()
     assert order.user == customer_user

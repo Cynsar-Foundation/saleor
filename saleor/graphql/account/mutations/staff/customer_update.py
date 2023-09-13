@@ -1,10 +1,12 @@
 from copy import copy
 
 import graphene
+from django.db.models import QuerySet
 
 from .....account import events as account_events
 from .....account import models
-from .....giftcard.utils import assign_user_gift_cards
+from .....giftcard.search import mark_gift_cards_search_index_as_dirty
+from .....giftcard.utils import assign_user_gift_cards, get_user_gift_cards
 from .....order.utils import match_orders_with_new_user
 from .....permission.enums import AccountPermissions
 from .....webhook.event_types import WebhookEventAsyncType
@@ -69,14 +71,17 @@ class CustomerUpdate(CustomerCreate, ModelWithExtRefMutation):
         has_new_email = old_instance.email != new_email
         was_activated = not old_instance.is_active and new_instance.is_active
         was_deactivated = old_instance.is_active and not new_instance.is_active
+        being_confirmed = not old_instance.is_confirmed and new_instance.is_confirmed
+
+        if has_new_email or being_confirmed:
+            assign_user_gift_cards(new_instance)
+            match_orders_with_new_user(new_instance)
 
         # Generate the events accordingly
         if has_new_email:
             account_events.assigned_email_to_a_customer_event(
                 staff_user=staff_user, app=app, new_email=new_email
             )
-            assign_user_gift_cards(new_instance)
-            match_orders_with_new_user(new_instance)
         if has_new_name:
             account_events.assigned_name_to_a_customer_event(
                 staff_user=staff_user, app=app, new_name=new_fullname
@@ -93,6 +98,20 @@ class CustomerUpdate(CustomerCreate, ModelWithExtRefMutation):
                 app=app,
                 account_id=old_instance.id,
             )
+
+    @classmethod
+    def update_gift_card_search_vector(
+        cls,
+        old_instance: models.User,
+        new_instance: models.User,
+        gift_cards: QuerySet,
+    ):
+        new_email = new_instance.email
+        new_fullname = new_instance.get_full_name()
+        has_new_name = old_instance.get_full_name() != new_fullname
+        has_new_email = old_instance.email != new_email
+        if has_new_email or has_new_name:
+            mark_gift_cards_search_index_as_dirty(gift_cards)
 
     @classmethod
     def perform_mutation(cls, _root, info: ResolveInfo, /, **data):
@@ -126,6 +145,11 @@ class CustomerUpdate(CustomerCreate, ModelWithExtRefMutation):
         if metadata_list:
             manager = get_plugin_manager_promise(info.context).get()
             cls.call_event(manager.customer_metadata_updated, new_instance)
+
+        if gift_cards := get_user_gift_cards(new_instance):
+            cls.update_gift_card_search_vector(
+                original_instance, new_instance, gift_cards
+            )
 
         # Return the response
         return cls.success_response(new_instance)

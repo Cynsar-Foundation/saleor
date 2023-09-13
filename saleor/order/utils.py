@@ -24,6 +24,7 @@ from ..discount.utils import (
 )
 from ..giftcard import events as gift_card_events
 from ..giftcard.models import GiftCard
+from ..giftcard.search import mark_gift_cards_search_index_as_dirty
 from ..payment.model_helpers import get_total_authorized
 from ..product.utils.digital_products import get_default_digital_content_settings
 from ..shipping.interface import ShippingMethodData
@@ -403,7 +404,9 @@ def add_gift_cards_to_order(
         if total_price_left > zero_money(total_price_left.currency):
             order_gift_cards.append(gift_card)
 
-            update_gift_card_balance(gift_card, total_price_left, balance_data)
+            total_price_left = update_gift_card_balance(
+                gift_card, total_price_left, balance_data
+            )
 
             set_gift_card_user(gift_card, used_by_user, used_by_email)
 
@@ -425,7 +428,7 @@ def update_gift_card_balance(
     gift_card: GiftCard,
     total_price_left: Money,
     balance_data: List[Tuple[GiftCard, float]],
-):
+) -> Money:
     previous_balance = gift_card.current_balance
     if total_price_left < gift_card.current_balance:
         gift_card.current_balance = gift_card.current_balance - total_price_left
@@ -434,6 +437,7 @@ def update_gift_card_balance(
         total_price_left = total_price_left - gift_card.current_balance
         gift_card.current_balance_amount = 0
     balance_data.append((gift_card, previous_balance.amount))
+    return total_price_left
 
 
 def set_gift_card_user(
@@ -448,6 +452,7 @@ def set_gift_card_user(
         else User.objects.filter(email=used_by_email).first()
     )
     gift_card.used_by_email = used_by_email
+    mark_gift_cards_search_index_as_dirty([gift_card])
 
 
 def _update_allocations_for_line(
